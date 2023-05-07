@@ -2,6 +2,12 @@
 name = "tilemap_astar"
 version = "0.1.0"
 edition = "2021"
+authors = ["Christian Sandven"]
+description = "Simple, dependencyless astar implementation"
+repository = "https://github.com/csandven/tilemap_astar"
+license = "MIT OR Apache-2.0"
+keywords = ["astar", "grid"]
+categories = ["algorithms", "game-development"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
