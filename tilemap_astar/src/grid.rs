@@ -1,8 +1,59 @@
 use crate::node::{HeuristicNode, Node};
 use crate::pos::Pos;
 
-use queue::Queue;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+#[derive(Clone)]
+pub struct CachedPath {
+  start_idx: usize,
+  target_idx: usize,
+  path: Vec<Pos>,
+}
+
+#[derive(Clone)]
+pub struct CachedGrid {
+  pub grid: Grid,
+  pub cache_size: usize,
+  pub cache: VecDeque<CachedPath>,
+}
+
+impl CachedGrid {
+  pub fn new(grid: Grid, cache_size: usize) -> CachedGrid {
+    CachedGrid {
+      grid,
+      cache_size,
+      cache: VecDeque::new(),
+    }
+  }
+
+  pub fn find_path(&mut self, start: Pos, target: Pos) -> Option<Vec<Pos>> {
+    let s_idx = self.grid.get_node_idx(start.0, start.1);
+    let t_idx = self.grid.get_node_idx(target.0, target.1);
+    if let Some(cached_path) = self
+      .cache
+      .iter()
+      .find(|p| p.start_idx == s_idx && p.target_idx == t_idx)
+    {
+      Some(cached_path.path.clone())
+    } else if let Some(path) = self.grid.find_path(start, target) {
+      self.put_cache(&(s_idx, t_idx), path.to_owned());
+      Some(path)
+    } else {
+      None
+    }
+  }
+
+  pub fn put_cache(&mut self, key: &(usize, usize), value: Vec<Pos>) {
+    if self.cache.len() == self.cache_size {
+      self.cache.pop_front();
+    }
+    self.cache.push_back(CachedPath {
+      start_idx: key.0,
+      target_idx: key.1,
+      path: value,
+    })
+  }
+}
 
 #[derive(Clone)]
 pub struct Grid {
@@ -28,7 +79,6 @@ impl Grid {
 
   pub fn get_node(&self, pos: &Pos) -> &Node {
     assert!(pos < &self.size.into());
-
     &self.nodes[self.get_node_idx(pos.0, pos.1)]
   }
 
@@ -53,7 +103,7 @@ impl Grid {
 
   fn find_path(&self, start: Pos, target: Pos) -> Option<Vec<Pos>> {
     let mut solved_grid = vec![];
-    let mut open_nodes = Queue::new();
+    let mut open_nodes = VecDeque::new();
     let mut working_set = HashMap::new();
     let start = self.get_node(&start);
     let finish = self.get_node(&target);
@@ -65,9 +115,9 @@ impl Grid {
       cost: heuristic,
     };
     working_set.insert(start.position.to_owned(), start.to_owned());
-    open_nodes.queue(node).unwrap();
+    open_nodes.push_back(node);
 
-    while let Some(current_node) = open_nodes.dequeue() {
+    while let Some(current_node) = open_nodes.pop_back() {
       if current_node.node.position == finish.position {
         let mut current = current_node.parent;
         let mut parent = working_set.get(&current.position);
@@ -80,13 +130,14 @@ impl Grid {
         solved_grid.push(finish.position.to_owned());
         return Some(solved_grid);
       } else {
-        let n_pos = current_node
+        let connected_neighbours = current_node
           .node
           .connections
           .iter()
           .flat_map(|c| self.nodes.iter().find(|n| &n.id == c))
           .collect::<Vec<&Node>>();
-        for node in n_pos {
+
+        for node in connected_neighbours {
           if !working_set.contains_key(&node.position) {
             let score = Node::score(node, finish);
             let depth = current_node.depth + 1;
@@ -97,7 +148,7 @@ impl Grid {
               cost: score,
             };
             working_set.insert(node.position.clone(), current_node.node.to_owned());
-            open_nodes.queue(h_node).unwrap();
+            open_nodes.push_back(h_node);
           }
         }
       }
@@ -109,7 +160,7 @@ impl Grid {
 
 #[cfg(test)]
 mod tests {
-  use crate::grid::Grid;
+  use crate::grid::{CachedGrid, Grid};
 
   use crate::pos::Pos;
 
@@ -137,11 +188,42 @@ mod tests {
   }
 
   #[test]
-  fn it_works() {
+  fn it_works_without_cache() {
     let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
     let grid: Grid = map.into();
     let p = grid.find_path(Pos(0, 0), Pos(0, 2));
     assert!(p.is_some());
     assert_eq!(p.unwrap(), vec![Pos(1, 0), Pos(2, 0), Pos(2, 1), Pos(2, 2), Pos(1, 2), Pos(0, 2)]);
+  }
+
+  #[test]
+  fn it_works_with_cache() {
+    let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
+    let grid: Grid = map.into();
+    let mut cached_grid = CachedGrid::new(grid, 10);
+    let p = cached_grid.find_path(Pos(0, 0), Pos(0, 2));
+    assert!(p.is_some());
+    let target_path = vec![Pos(1, 0), Pos(2, 0), Pos(2, 1), Pos(2, 2), Pos(1, 2), Pos(0, 2)];
+    assert_eq!(p.unwrap(), target_path);
+    assert_eq!(cached_grid.cache.get(0).map(|d| d.path.to_owned()), Some(target_path))
+  }
+
+  #[test]
+  fn cache_limit_is_handled() {
+    let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
+    let grid: Grid = map.into();
+    let mut cached_grid = CachedGrid::new(grid, 1);
+    let p1 = cached_grid.find_path(Pos(0, 0), Pos(0, 2));
+    assert!(p1.is_some());
+    let first_target_path = vec![Pos(1, 0), Pos(2, 0), Pos(2, 1), Pos(2, 2), Pos(1, 2), Pos(0, 2)];
+    assert_eq!(p1.unwrap(), first_target_path);
+    assert_eq!(cached_grid.cache.get(0).map(|d| d.path.to_owned()), Some(first_target_path));
+
+    let p2 = cached_grid.find_path(Pos(1, 0), Pos(2, 1));
+    assert!(p2.is_some());
+    let second_target_path = vec![Pos(2, 0), Pos(2, 1)];
+    assert_eq!(p2.unwrap(), second_target_path);
+    assert_eq!(cached_grid.cache.len(), 1);
+    assert_eq!(cached_grid.cache.get(0).map(|d| d.path.to_owned()), Some(second_target_path));
   }
 }
