@@ -77,7 +77,31 @@ impl Grid {
     }
   }
 
-  pub fn get_node(&self, pos: &Pos) -> &Node {
+  pub fn fully_connected(size: (u32, u32)) -> Grid {
+    let mut new_grid = Grid::new(size);
+    new_grid.clone().iter().for_each(|node| {
+      let connections = node
+        .position
+        .neighbour_positions(false)
+        .iter()
+        .flat_map(|n_pos| new_grid.get_node(n_pos).to_owned())
+        .map(|n| n.to_owned())
+        .collect::<Vec<Node>>();
+      new_grid.set_connections(node, connections);
+    });
+    new_grid
+  }
+
+  pub fn not_out_of_bounds(&self, pos: &Pos) -> bool {
+    dbg!(&pos);
+    pos < &self.size.into()
+  }
+
+  pub fn get_node(&self, pos: &Pos) -> Option<&Node> {
+    self.nodes.iter().find(|n| &n.position == pos)
+  }
+
+  pub fn node_at(&self, pos: &Pos) -> &Node {
     assert!(pos < &self.size.into());
     &self.nodes[self.get_node_idx(pos.0, pos.1)]
   }
@@ -105,8 +129,8 @@ impl Grid {
     let mut solved_grid = vec![];
     let mut open_nodes = VecDeque::new();
     let mut working_set = HashMap::new();
-    let start = self.get_node(&start);
-    let finish = self.get_node(&target);
+    let start = self.node_at(&start);
+    let finish = self.node_at(&target);
     let heuristic = Node::score(start, finish);
     let node = HeuristicNode {
       parent: start,
@@ -143,7 +167,7 @@ impl Grid {
             let depth = current_node.depth + 1;
             let h_node = HeuristicNode {
               parent: current_node.node,
-              node: self.get_node(&node.position),
+              node: self.node_at(&node.position),
               depth,
               cost: score,
             };
@@ -163,6 +187,7 @@ mod tests {
   use crate::grid::{CachedGrid, Grid};
 
   use crate::pos::Pos;
+  use crate::prelude::Node;
 
   impl From<Vec<Vec<&str>>> for Grid {
     fn from(value: Vec<Vec<&str>>) -> Self {
@@ -176,7 +201,7 @@ mod tests {
             value.get(np.1 as usize).map(|y| {
               y.get(np.0 as usize)
                 .map(|x| x == &".")
-                .and_then(|b| b.then(|| grid.get_node(np).to_owned()))
+                .and_then(|b| b.then(|| grid.node_at(np).to_owned()))
             })
           })
           .flatten()
@@ -185,6 +210,70 @@ mod tests {
       });
       grid
     }
+  }
+
+  #[test]
+  fn it_works_fully_connected() {
+    let grid: Grid = Grid::fully_connected((3, 3));
+    assert_eq!(
+      grid.nodes,
+      vec![
+        Node {
+          id: 0,
+          position: Pos(0, 0),
+          connections: vec![1, 3],
+          cost: 0,
+        },
+        Node {
+          id: 1,
+          position: Pos(1, 0),
+          connections: vec![2, 4, 0],
+          cost: 0,
+        },
+        Node {
+          id: 2,
+          position: Pos(2, 0),
+          connections: vec![5, 1],
+          cost: 0,
+        },
+        Node {
+          id: 3,
+          position: Pos(0, 1),
+          connections: vec![4, 6, 0],
+          cost: 0
+        },
+        Node {
+          id: 4,
+          position: Pos(1, 1),
+          connections: vec![5, 7, 3, 1],
+          cost: 0
+        },
+        Node {
+          id: 5,
+          position: Pos(2, 1),
+          connections: vec![8, 4, 2],
+          cost: 0
+        },
+        Node {
+          id: 6,
+          position: Pos(0, 2),
+          connections: vec![7, 3],
+          cost: 0
+        },
+        Node {
+          id: 7,
+          position: Pos(1, 2),
+          connections: vec![8, 6, 4],
+          cost: 0
+        },
+        Node {
+          id: 8,
+          position: Pos(2, 2),
+          connections: vec![7, 5],
+          cost: 0
+        }
+      ]
+    )
   }
 
   #[test]
