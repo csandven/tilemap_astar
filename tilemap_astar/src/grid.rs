@@ -1,4 +1,4 @@
-use crate::node::{HeuristicNode, Node};
+use crate::node::{HeuristicNode, Node, NodeConnection};
 use crate::pos::Pos;
 
 use std::collections::{HashMap, VecDeque};
@@ -43,6 +43,17 @@ impl CachedGrid {
     }
   }
 
+  pub fn remove_connections_for_node(&mut self, node: &Node) {
+    self.grid.remove_connections_for_node(node);
+    let valid_cached_paths = self
+      .cache
+      .clone()
+      .into_iter()
+      .filter(|cp| !cp.path.contains(&node.position))
+      .collect();
+    self.cache = valid_cached_paths;
+  }
+
   pub fn put_cache(&mut self, key: &(usize, usize), value: Vec<Pos>) {
     if self.cache.len() == self.cache_size {
       self.cache.pop_front();
@@ -59,6 +70,7 @@ impl CachedGrid {
 pub struct Grid {
   size: (u32, u32),
   nodes: Vec<Node>,
+  connections: Vec<NodeConnection>,
 }
 
 impl Grid {
@@ -74,6 +86,7 @@ impl Grid {
     Grid {
       size: size.to_owned(),
       nodes,
+      connections: vec![],
     }
   }
 
@@ -93,7 +106,6 @@ impl Grid {
   }
 
   pub fn not_out_of_bounds(&self, pos: &Pos) -> bool {
-    dbg!(&pos);
     pos < &self.size.into()
   }
 
@@ -107,10 +119,30 @@ impl Grid {
   }
 
   pub fn set_connections(&mut self, node: &Node, connected_nodes: Vec<Node>) {
-    self.nodes[node.id as usize] = Node {
-      connections: connected_nodes.into_iter().map(|cn| cn.id).collect(),
-      ..node.to_owned()
-    }
+    let mut connections = connected_nodes
+      .iter()
+      .map(|cn| NodeConnection(node.id, cn.id))
+      .filter(|nc| !self.connections.contains(nc))
+      .collect::<Vec<NodeConnection>>();
+    self.connections.append(&mut connections);
+  }
+
+  pub fn remove_connections_for_node(&mut self, node: &Node) {
+    let updated_connections = self
+      .connections
+      .clone()
+      .into_iter()
+      .filter(|nc| !(nc.0 != node.id || nc.1 != node.id))
+      .collect();
+    self.connections = updated_connections;
+  }
+
+  pub fn get_connections(&self, node: &Node) -> Vec<&NodeConnection> {
+    self
+      .connections
+      .iter()
+      .filter(|con| con.0 == node.id || con.1 == node.id)
+      .collect()
   }
 
   pub fn update_node(&mut self, node: &Node) {
@@ -154,11 +186,11 @@ impl Grid {
         solved_grid.push(finish.position.to_owned());
         return Some(solved_grid);
       } else {
-        let connected_neighbours = current_node
-          .node
-          .connections
+        let connected_neighbours = self
+          .get_connections(current_node.node)
           .iter()
-          .flat_map(|c| self.nodes.iter().find(|n| &n.id == c))
+          .flat_map(|NodeConnection(c1, c2)| self.nodes.iter().filter(|n| n.id == *c1 || n.id == *c2))
+          .filter(|node| node != &current_node.node)
           .collect::<Vec<&Node>>();
 
         for node in connected_neighbours {
@@ -185,29 +217,35 @@ impl Grid {
 #[cfg(test)]
 mod tests {
   use crate::grid::{CachedGrid, Grid};
+  use crate::node::NodeConnection;
 
   use crate::pos::Pos;
-  use crate::prelude::Node;
 
-  impl From<Vec<Vec<&str>>> for Grid {
-    fn from(value: Vec<Vec<&str>>) -> Self {
+  impl From<Vec<&str>> for Grid {
+    fn from(value: Vec<&str>) -> Self {
       let mut grid = Grid::new((3, 3));
-      grid.clone().iter().for_each(|node| {
-        let nps = node.position.neighbour_positions(false);
-
-        let connections = nps
-          .iter()
-          .flat_map(|np| {
-            value.get(np.1 as usize).map(|y| {
-              y.get(np.0 as usize)
-                .map(|x| x == &".")
-                .and_then(|b| b.then(|| grid.node_at(np).to_owned()))
+      grid
+        .clone()
+        .iter()
+        .filter(|n| {
+          let idx = ((n.position.1 * 3) + n.position.0) as usize;
+          value.get(idx) == Some(&".")
+        })
+        .for_each(|node| {
+          let nps = node.position.neighbour_positions(false);
+          let connections = nps
+            .iter()
+            .flat_map(|np| {
+              let idx = ((np.1 * 3) + np.0) as usize;
+              match value.get(idx) {
+                Some(v) if v == &"." => grid.get_node(np),
+                _ => None,
+              }
             })
-          })
-          .flatten()
-          .collect();
-        grid.set_connections(node, connections);
-      });
+            .map(|n| n.to_owned())
+            .collect();
+          grid.set_connections(node, connections);
+        });
       grid
     }
   }
@@ -216,69 +254,27 @@ mod tests {
   fn it_works_fully_connected() {
     let grid: Grid = Grid::fully_connected((3, 3));
     assert_eq!(
-      grid.nodes,
+      grid.connections,
       vec![
-        Node {
-          id: 0,
-          position: Pos(0, 0),
-          connections: vec![1, 3],
-          cost: 0,
-        },
-        Node {
-          id: 1,
-          position: Pos(1, 0),
-          connections: vec![2, 4, 0],
-          cost: 0,
-        },
-        Node {
-          id: 2,
-          position: Pos(2, 0),
-          connections: vec![5, 1],
-          cost: 0,
-        },
-        Node {
-          id: 3,
-          position: Pos(0, 1),
-          connections: vec![4, 6, 0],
-          cost: 0
-        },
-        Node {
-          id: 4,
-          position: Pos(1, 1),
-          connections: vec![5, 7, 3, 1],
-          cost: 0
-        },
-        Node {
-          id: 5,
-          position: Pos(2, 1),
-          connections: vec![8, 4, 2],
-          cost: 0
-        },
-        Node {
-          id: 6,
-          position: Pos(0, 2),
-          connections: vec![7, 3],
-          cost: 0
-        },
-        Node {
-          id: 7,
-          position: Pos(1, 2),
-          connections: vec![8, 6, 4],
-          cost: 0
-        },
-        Node {
-          id: 8,
-          position: Pos(2, 2),
-          connections: vec![7, 5],
-          cost: 0
-        }
+        NodeConnection(0, 1),
+        NodeConnection(0, 3),
+        NodeConnection(1, 2),
+        NodeConnection(1, 4),
+        NodeConnection(2, 5),
+        NodeConnection(3, 4),
+        NodeConnection(3, 6),
+        NodeConnection(4, 5),
+        NodeConnection(4, 7),
+        NodeConnection(5, 8),
+        NodeConnection(6, 7),
+        NodeConnection(7, 8)
       ]
     )
   }
 
   #[test]
   fn it_works_without_cache() {
-    let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
+    let map = vec![".", ".", ".", "#", "#", ".", ".", ".", "."];
     let grid: Grid = map.into();
     let p = grid.find_path(Pos(0, 0), Pos(0, 2));
     assert!(p.is_some());
@@ -287,7 +283,7 @@ mod tests {
 
   #[test]
   fn it_works_with_cache() {
-    let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
+    let map = vec![".", ".", ".", "#", "#", ".", ".", ".", "."];
     let grid: Grid = map.into();
     let mut cached_grid = CachedGrid::new(grid, 10);
     let p = cached_grid.find_path(Pos(0, 0), Pos(0, 2));
@@ -299,7 +295,7 @@ mod tests {
 
   #[test]
   fn cache_limit_is_handled() {
-    let map = vec![vec![".", ".", "."], vec!["#", "#", "."], vec![".", ".", "."]];
+    let map = vec![".", ".", ".", "#", "#", ".", ".", ".", "."];
     let grid: Grid = map.into();
     let mut cached_grid = CachedGrid::new(grid, 1);
     let p1 = cached_grid.find_path(Pos(0, 0), Pos(0, 2));

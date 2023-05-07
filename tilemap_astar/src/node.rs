@@ -12,21 +12,24 @@ pub(crate) struct HeuristicNode<'a> {
 pub struct Node {
   pub id: u32,
   pub position: Pos,
-  pub(crate) connections: Vec<u32>,
   pub cost: u64,
 }
 
 impl Node {
   pub fn new(id: u32, position: Pos) -> Node {
-    Node {
-      id,
-      position,
-      connections: vec![],
-      cost: 0,
-    }
+    Node { id, position, cost: 0 }
   }
 
   pub fn score(node_a: &Node, node_b: &Node) -> u64 {
     Pos::score(&node_a.position, &node_b.position) + node_a.cost + node_b.cost
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct NodeConnection(pub u32, pub u32);
+
+impl PartialEq for NodeConnection {
+  fn eq(&self, other: &Self) -> bool {
+    self.0 == other.0 && self.1 == other.1 || self.0 == other.1 && self.1 == other.0
   }
 }
